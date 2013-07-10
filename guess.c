@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <mpi.h>
-
+/*
+ * A guess number program, proc 0 has a number for all other procs to guess
+ * output the proc id, the number, and the rank of the guesser.
+ * Each time the guesser missed, proc 0 will tell whether the guessed number
+ * is bigger or smaller.
+ */
+ 
 #define MAXNUM 1000000
 void main(int argc, char *argv[]){
 	MPI_Init(&argc, &argv);
