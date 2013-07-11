@@ -1,3 +1,17 @@
+/*
+ * "Game of Life" is a simple simulation developed by John Conway. In the "Game of Life" the domain is a 
+ * 2-dimensional array of cells, and each cell can have one of two possible states,"alive" or "dead." 
+ * The array is usually intialized using random numbers and the system then evolves in time. At each time step, 
+ * each cell may or may not change its state, based on the number of adjacent alive cells, including diagonals. 
+ *
+ * There are three rules:
+ * 1. If a cell has three neighbors that are alive, the cell will be alive. If it was already alive, it will remain so, 
+ *    and if it was dead, it will become alive.
+ * 2. If a cell has two neighbors that are alive, there is no change to the cell. If it was dead, it will remain dead, 
+ *    and if it was alive, it will remain alive.
+ * 3. In all other cases — the cell will be dead. If it was alive it becomes dead and if it was dead it remains dead.
+ */
+
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +21,7 @@
 #define DEBUG 1
 #define PERCENTAGE 60
 #define SIMUTIME 10
+
 void print_cell(int **cell, int arr_size_x, int arr_size_y){
     int i,j;
     for (i = 1; i < arr_size_x - 1; i++) {
@@ -83,24 +98,22 @@ int polpulate(int **oldcell, int **newcell, int arr_size_x, int arr_size_y){
 void main(int argc, char* argv[]) {
     
     int my_rank, comm_size;
-    int arr_size_x, arr_size_y;
+	int arr_size_x, arr_size_y;
     int i,j,tmp,count,iterationstep,livecount,pastlivecount;
-    char buf[10];
     int** oldcell;
     int** newcell;
     int** tmpcell;
 	int** complementcell;
-	MPI_Status status;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD,&comm_size);
     MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);
-
     if(my_rank==0){
 	    printf("Enter array size:");
 	    scanf("%d %d",&arr_size_x, &arr_size_y);
     }
-	
+
+	MPI_Status status;
     MPI_Bcast(&arr_size_x, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&arr_size_y, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -108,8 +121,8 @@ void main(int argc, char* argv[]) {
 	printf("%d: x=%d, y=%d\n",my_rank,arr_size_x, arr_size_y);
 #endif
 
-    oldcell = malloc(sizeof(int*) * (arr_size_x/2 + 2));
-    newcell = malloc(sizeof(int*) * ((arr_size_x+1)/2 + 2));
+    oldcell = malloc(sizeof(int*) * (arr_size_x + 2));
+    newcell = malloc(sizeof(int*) * (arr_size_x + 2));
     complementcell = malloc(sizeof(int*) * ((arr_size_x+1)/2 + 2));
 	
 
