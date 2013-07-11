@@ -16,16 +16,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include <time.h>
 #define DEBUG 1
 #define PERCENTAGE 60
 #define SIMUTIME 10
 
-void print_cell(int **cell, int arr_size_x, int arr_size_y){
-    int i,j;
-    for (i = 1; i < arr_size_x - 1; i++) {
-        for (j = 1; j < arr_size_y - 1; j++) {
+void print_cell(int **cell, int arr_size_x, int arr_size_y, int print_ghostcell){
+    int i, j, p;
+    if(print_ghostcell == 1)
+    	p = 0;
+    else
+    	p = -1;
+    for (i = 0; i < arr_size_x + p; i++) {
+        for (j = 0; j < arr_size_y + p; j++) {
             printf("%d ",cell[i][j]);
         }
         printf("\n");
@@ -35,10 +38,23 @@ void print_cell(int **cell, int arr_size_x, int arr_size_y){
 
 void update_ghostcell(int **cell, int arr_size_x, int arr_size_y){
     int i,j;
+
+    // four corner
+    cell[0][0] 							= cell[arr_size_x - 2][arr_size_y - 2];
+    cell[0][arr_size_y - 1] 			= cell[arr_size_x - 2][1];
+    cell[arr_size_x - 1][0] 			= cell[1][arr_size_y - 2];
+    cell[arr_size_x - 1][arr_size_y - 1] = cell[1][1];
+
+    // four border
     for(i = 1; i < arr_size_x - 1; i++){
-        cell[i][0] = cell[i][arr_size_y-2];
+        cell[i][0] = cell[i][arr_size_y - 2];
         cell[i][arr_size_y - 1] = cell[i][1];
     }
+    for(i = 1; i < arr_size_y - 1; i++){
+        cell[0][i] = cell[arr_size_x - 2][i];
+        cell[arr_size_x - 1][i] = cell[1][i];
+    }
+
 }
 
 int count_neighbor(int **cell, int arr_size_x, int arr_size_y, int i, int j){
@@ -52,14 +68,14 @@ int count_neighbor(int **cell, int arr_size_x, int arr_size_y, int i, int j){
 }
 
 
-void gen_life(int **cell, int arr_size_x, int arr_size_y, int rank){
-	//randomly generate life
-	srand(time(NULL)*rank);
+void gen_life(int **cell, int arr_size_x, int arr_size_y){
+	//r andomly generate life
+	srand(time(NULL));
 	int i,j,tmp;
 	for (i = 0; i < arr_size_x; i++) {
         for (j = 0; j < arr_size_y; j++) {
 			if(i == 0 || j == 0 || i == arr_size_x - 1 || j == arr_size_y - 1){
-				cell[i][j] = -1; //ghost cell init
+				cell[i][j] = -1; // ghost cell init
 				continue;			
 			}		
 			
@@ -100,123 +116,122 @@ void main(int argc, char* argv[]) {
     int my_rank, comm_size;
 	int arr_size_x, arr_size_y;
     int i,j,tmp,count,iterationstep,livecount,pastlivecount;
-    int** oldcell;
-    int** newcell;
-    int** tmpcell;
-	int** complementcell;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD,&comm_size);
     MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);
+
     if(my_rank==0){
 	    printf("Enter array size:");
 	    scanf("%d %d",&arr_size_x, &arr_size_y);
     }
 
-	MPI_Status status;
+    // include ghost cell size to both
+    arr_size_x += 2;
+    arr_size_y += 2;
+
+    MPI_Status status;
+    // after broadcast each proc knows arr_size_x and arr_size_y
     MPI_Bcast(&arr_size_x, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&arr_size_y, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-#if 0
-	printf("%d: x=%d, y=%d\n",my_rank,arr_size_x, arr_size_y);
-#endif
+//    if(my_rank == 1){
+//    	int sleep=1;
+//    	while(sleep){;}
+//    }
 
-    oldcell = malloc(sizeof(int*) * (arr_size_x + 2));
-    newcell = malloc(sizeof(int*) * (arr_size_x + 2));
-    complementcell = malloc(sizeof(int*) * ((arr_size_x+1)/2 + 2));
-	
+    // now we know how to divide the matrix vertically between ranks
+    int rank_sub_arr_x = arr_size_x / comm_size;
+    int rank_sub_arr_y = arr_size_y;
+	//printf("PROC %d:%d %d\n",my_rank, rank_sub_arr_x, rank_sub_arr_y);
 
-	if(my_rank == 0){
-	//deal with upper half
-		for (i = 0; i < arr_size_x/2 + 2; i++) {
-			oldcell[i] = malloc(sizeof(int) * (arr_size_y + 2));
-			newcell[i] = malloc(sizeof(int) * (arr_size_y + 2));
-		}
-
-		//store other half
-		for (i = 0; i < (arr_size_x+1)/2 + 2; i++) {
-           		complementcell[i] = malloc(sizeof(int) * (arr_size_y + 2));
-	    	}
-	
-		gen_life(oldcell, arr_size_x/2 + 2, arr_size_y + 2, my_rank);
-
-		iterationstep = 0;
-
-		while(1){
-    		MPI_Bcast(&iterationstep, 1, MPI_INT, 0, MPI_COMM_WORLD);
-			if(iterationstep > SIMUTIME)
-				break;
-			printf("After %d unit of time:\n",iterationstep);
+    /* Now only consider evenly distributed situation
+     * i.e. 20 * 30 matrix size with 4 * 3 processes
+     * TODO:possible residue
+    int rank_sub_arr_x_res = arr_size_x + arr_size_x % comm_size;
+    int rank_sub_arr_y_res = arr_size_y;
+     */
 
 
-			update_ghostcell(oldcell, arr_size_x/2 + 2, arr_size_y + 2);
+    // allocate local storage
+	int *loc_cell_1d = malloc((rank_sub_arr_x+2) * rank_sub_arr_y * sizeof(int));
+	int **loc_cell = malloc((rank_sub_arr_x+2) * sizeof(int*));
 
-			//receive ghost cell info
-			MPI_Recv(oldcell[0], arr_size_y + 2, MPI_INT, 1, 100, MPI_COMM_WORLD, &status);
-			MPI_Recv(oldcell[arr_size_x/2 + 1], arr_size_y + 2, MPI_INT, 1, 200, MPI_COMM_WORLD, &status);
-
-			//send to ghost cell		
-			MPI_Send(oldcell[1], arr_size_y + 2, MPI_INT, 1, 200, MPI_COMM_WORLD);
-			MPI_Send(oldcell[arr_size_x/2], arr_size_y + 2, MPI_INT, 1, 100, MPI_COMM_WORLD);
-
-			print_cell(oldcell, arr_size_x/2 + 2, arr_size_y + 2);
-
-			for(i = 0; i < (arr_size_x+1)/2 + 2; i++)
-				MPI_Recv(complementcell[i], arr_size_y + 2, MPI_INT, 1, i, MPI_COMM_WORLD, &status);
-
-			//print other half		
-			print_cell(complementcell, (arr_size_x+1)/2 + 2, arr_size_y + 2);
-
-			//MPI_Barrier(MPI_COMM_WORLD);
-
-			polpulate(oldcell, newcell, arr_size_x/2 + 2, arr_size_y + 2);
-
-			tmpcell = oldcell;
-			oldcell = newcell;
-			newcell = tmpcell;	
-			iterationstep ++;
-		}
-
+	for(i = 0; i < (rank_sub_arr_x+2); i++){
+		loc_cell[i] = &loc_cell_1d[i * rank_sub_arr_y];
 	}
-	else if(my_rank == 1){
-	//deal with lower half
-		for(i = 0; i < (arr_size_x+1)/2 + 2; i++) {
-        	oldcell[i] = malloc(sizeof(int) * (arr_size_y + 2));
-        	newcell[i] = malloc(sizeof(int) * (arr_size_y + 2));
+
+
+    if(my_rank == 0){
+
+    	// proc 0 will generate and store the whole matrix
+    	int *cell_1d = malloc(arr_size_x * arr_size_y * sizeof(int));
+    	int **cell = malloc(arr_size_x * sizeof(int*));
+    	for(i = 0; i < arr_size_x; i++){
+    		cell[i] = &cell_1d[i * arr_size_y];
     	}
 
-		gen_life(oldcell, (arr_size_x+1)/2 + 2, arr_size_y + 2, my_rank);
+    	int print_ghostcell = 1;
+    	gen_life(cell, arr_size_x, arr_size_y);
+    	//print_cell(cell, arr_size_x, arr_size_y, 1);
 
-		while(1){
-			MPI_Bcast(&iterationstep, 1, MPI_INT, 0, MPI_COMM_WORLD);
-			if(iterationstep > SIMUTIME)
-				break;
-			update_ghostcell(oldcell, (arr_size_x+1)/2 + 2, arr_size_y + 2);
+    	update_ghostcell(cell, arr_size_x, arr_size_y);
+    	print_cell(cell, arr_size_x, arr_size_y, print_ghostcell);
 
-			//send to ghost cell		
-			MPI_Send(oldcell[1], arr_size_y + 2, MPI_INT, 0, 200, MPI_COMM_WORLD);
-			MPI_Send(oldcell[(arr_size_x+1)/2], arr_size_y + 2, MPI_INT, 0, 100, MPI_COMM_WORLD);
+    	//printf("PROC 0 Comp Size:%d %d\n",arr_size_x, arr_size_y);
 
-			//receive
-			MPI_Recv(oldcell[0], arr_size_y + 2, MPI_INT, 0, 100, MPI_COMM_WORLD, &status);
-			MPI_Recv(oldcell[(arr_size_x+1)/2 + 1], arr_size_y + 2, MPI_INT, 0, 200, MPI_COMM_WORLD, &status);
+    	// distribute matrix
+    	// special operation to first and last rank
+    	for(i = 0; i < (rank_sub_arr_x + 1) * rank_sub_arr_y; i++){
+    		loc_cell[i] = cell[i];
+    	}
 
-			for(i = 0; i < (arr_size_x+1)/2 + 2; i++)
-				MPI_Send(oldcell[i], arr_size_y + 2, MPI_INT, 0, i, MPI_COMM_WORLD);
+    	MPI_COMM_Send(cell[(rank_sub_arr_x * arr_size_x) - 1], (rank_sub_arr_x + 1) * rank_sub_arr_y, MPI_INT, comm_size - 1, 0, MPI_COMM_WORLD);
 
-			polpulate(oldcell, newcell, arr_size_x/2 + 2, arr_size_y + 2);		
+    	// all other ranks
+    	for(i = 1; i < comm_size - 1; i++){
+    		MPI_COMM_Send(cell[(rank_sub_arr_x * i) - 1], (rank_sub_arr_x + 2) * rank_sub_arr_y, MPI_INT, i, 0, MPI_COMM_WORLD);
+    	}
+
+    }
+    else if(my_rank == comm_size - 1){
 
 
-			tmpcell = oldcell;
-			oldcell = newcell;
-			newcell = tmpcell;	
-		}
-	}
+    	MPI_COMM_Recv(loc_cell, (rank_sub_arr_x + 1) * rank_sub_arr_y, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
 
-		
 
+
+    }
+    else{
+    	MPI_COMM_Recv(loc_cell, (rank_sub_arr_x + 2) * rank_sub_arr_y, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+
+
+    }
 
 	MPI_Finalize();
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
