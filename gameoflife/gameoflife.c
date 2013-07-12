@@ -10,8 +10,19 @@
  * 2. If a cell has two neighbors that are alive, there is no change to the cell. If it was dead, it will remain dead, 
  *    and if it was alive, it will remain alive.
  * 3. In all other cases — the cell will be dead. If it was alive it becomes dead and if it was dead it remains dead.
+ *
  */
 
+
+/* 
+ * For now the program divide the matrix(2-dimensional array of cells) by # of proc evenly.
+ * Proc 0 is in charge of distribution, each proc get arr_size_x/comm_size rows of cells and calculate on their own.
+ * After each time step, all proc send their data to proc 0 and then start over again.
+ * TODO: When arr_size_x cannot be evenly divided by proc #
+ * TODO: divide into submatrix instead of horizontally and measure the time
+ *
+ */
+ 
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
