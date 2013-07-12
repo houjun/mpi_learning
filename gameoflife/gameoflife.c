@@ -72,7 +72,7 @@ int count_neighbor(int **cell, int arr_size_x, int arr_size_y, int i, int j){
 
 void gen_life(int **cell, int arr_size_x, int arr_size_y){
 	//r andomly generate life
-	srand(time(NULL));
+//	srand(time(NULL));
 	int i,j,tmp;
 	for (i = 0; i < arr_size_x; i++) {
         for (j = 0; j < arr_size_y; j++) {
@@ -117,18 +117,19 @@ void main(int argc, char* argv[]) {
     
     int my_rank, comm_size;
 	int arr_size_x, arr_size_y;
-    int i,j,count,iterationstep,livecount,pastlivecount;
+    int i,j,count,livecount,totalcount;
+    char intmp[10];
+    double start_time, end_time, elapsed_time, all_time;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD,&comm_size);
     MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);
 
-//    if(my_rank==0){
-//	    printf("Enter array size:");
-//	    scanf("%d %d",&arr_size_x, &arr_size_y);
-//    }
-    arr_size_x = 10;
-    arr_size_y = 10;
+    if(my_rank==0){
+	    printf("Enter array size:");
+	    scanf("%d %d",&arr_size_x, &arr_size_y);
+    }
+
     // include ghost cell size to both
     arr_size_x += 2;
     arr_size_y += 2;
@@ -168,93 +169,118 @@ void main(int argc, char* argv[]) {
 	}
 
 
-    if(my_rank == 0){
-
-    	// proc 0 will generate and store the whole matrix
-    	int *cell_1d = malloc(arr_size_x * arr_size_y * sizeof(int));
-    	cell = malloc(arr_size_x * sizeof(int*));
-    	for(i = 0; i < arr_size_x; i++){
-    		cell[i] = &cell_1d[i * arr_size_y];
-    	}
-
-    	gen_life(cell, arr_size_x, arr_size_y);
-    	//print_cell(cell, arr_size_x, arr_size_y, 1);
-
-    	update_ghostcell(cell, arr_size_x, arr_size_y);
-    	printf("Origin:\n");
-    	print_cell(cell, arr_size_x, arr_size_y, print_ghostcell);
-
-    	//printf("PROC 0 Comp Size:%d %d\n",arr_size_x, arr_size_y);
-
-    	// distribute matrix
-    	// special operation to first: just copy, no need to send.
-    	for(i = 0; i < rank_sub_arr_x + 1 ; i++){
-    		for(j = 0; j < rank_sub_arr_y; j++)
-    			old_loc_cell[i][j] = cell[i][j];
-    	}
-    	// send to last rank
-    	MPI_Send(cell[(comm_size - 1) * rank_sub_arr_x - 1], (rank_sub_arr_x + 1) * rank_sub_arr_y
-    			, MPI_INT, comm_size - 1, 0, MPI_COMM_WORLD);
-
-    	// all other ranks
-    	for(i = 1; i < comm_size - 1; i++){
-    		MPI_Send(cell[(rank_sub_arr_x * i) - 1], (rank_sub_arr_x + 2) * rank_sub_arr_y, MPI_INT, i, 0, MPI_COMM_WORLD);
-    	}
-
-    }
-
     // real rank sub-matrix size
     if(my_rank == 0 || my_rank == comm_size - 1)
     	rank_sub_arr_x++;
     else
     	rank_sub_arr_x += 2;
 
-    if(my_rank != 0)
-    	MPI_Recv(old_loc_cell[0], rank_sub_arr_x * rank_sub_arr_y, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+    if(my_rank == 0){
 
-#if DEBUG
-	printf("From Proc %d:\n", my_rank);
-	print_cell(old_loc_cell, rank_sub_arr_x, rank_sub_arr_y, print_ghostcell);
-#endif
+    			// proc 0 will generate and store the whole matrix
+    			int *cell_1d = malloc(arr_size_x * arr_size_y * sizeof(int));
+    			cell = malloc(arr_size_x * sizeof(int*));
+    			for(i = 0; i < arr_size_x; i++){
+    				cell[i] = &cell_1d[i * arr_size_y];
+    			}
 
-    // populate
-	livecount = polpulate(old_loc_cell, new_loc_cell, rank_sub_arr_x, rank_sub_arr_y);
+    			gen_life(cell, arr_size_x, arr_size_y);
+    			//print_cell(cell, arr_size_x, arr_size_y, 1);
 
-#if DEBUG
-    printf("After Popoulate from Proc %d:\n", my_rank);
-	print_cell(old_loc_cell, rank_sub_arr_x, rank_sub_arr_y, print_ghostcell);
-#endif
+    			update_ghostcell(cell, arr_size_x, arr_size_y);
+    			printf("Origin:\n");
+    			print_cell(cell, arr_size_x, arr_size_y, print_ghostcell);
+    }
+
+    while(1){
+
+    	start_time = MPI_Wtime();
+
+		if(my_rank == 0){
+
+			// distribute matrix
+			// special operation to first: just copy, no need to send.
+			for(i = 0; i < rank_sub_arr_x ; i++){
+				for(j = 0; j < rank_sub_arr_y; j++)
+					old_loc_cell[i][j] = cell[i][j];
+			}
+			// send to last rank
+			MPI_Send(cell[(comm_size - 1) * (rank_sub_arr_x - 1) - 1], rank_sub_arr_x * rank_sub_arr_y
+					, MPI_INT, comm_size - 1, 0, MPI_COMM_WORLD);
+
+			// all other ranks
+			for(i = 1; i < comm_size - 1; i++){
+				MPI_Send(cell[((rank_sub_arr_x - 1) * i) - 1], (rank_sub_arr_x + 1) * rank_sub_arr_y, MPI_INT, i, 0, MPI_COMM_WORLD);
+			}
+
+		}
 
 
-	// collect results
-	if(my_rank == 0){
-		for(i = 1; i < comm_size; i++)
-			MPI_Recv(cell[i * (rank_sub_arr_x - 1)], (rank_sub_arr_x - 1) * rank_sub_arr_y, MPI_INT, i, i, MPI_COMM_WORLD, &status);
+		if(my_rank != 0)
+			MPI_Recv(old_loc_cell[0], rank_sub_arr_x * rank_sub_arr_y, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
 
-    	for(i = 1; i < rank_sub_arr_x - 1; i++){
-    		for(j = 0; j < rank_sub_arr_y; j++)
-    			cell[i][j] = new_loc_cell[i][j];
+	#if DEBUG
+		printf("From Proc %d:\n", my_rank);
+		print_cell(old_loc_cell, rank_sub_arr_x, rank_sub_arr_y, print_ghostcell);
+	#endif
+
+		// populate
+		livecount = polpulate(old_loc_cell, new_loc_cell, rank_sub_arr_x, rank_sub_arr_y);
+		MPI_Reduce(&livecount, &totalcount, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+	#if DEBUG
+		printf("After Popoulate from Proc %d:\n", my_rank);
+		print_cell(old_loc_cell, rank_sub_arr_x, rank_sub_arr_y, print_ghostcell);
+	#endif
+
+
+		// collect results
+		if(my_rank == 0){
+			for(i = 1; i < comm_size; i++)
+				MPI_Recv(cell[i * (rank_sub_arr_x - 1)], (rank_sub_arr_x - 1) * rank_sub_arr_y, MPI_INT, i, i, MPI_COMM_WORLD, &status);
+
+			for(i = 1; i < rank_sub_arr_x - 1; i++){
+				for(j = 0; j < rank_sub_arr_y; j++)
+					cell[i][j] = new_loc_cell[i][j];
+			}
+
+			update_ghostcell(cell, arr_size_x, arr_size_y);
+	    	printf("Living cells:%d\n", totalcount);
+			print_cell(cell, arr_size_x, arr_size_y, print_ghostcell);
+
+		}
+		else{
+			// only send row 1 ~ rank_sub_arr_x - 1
+			MPI_Send(new_loc_cell[1], (rank_sub_arr_x - 2) * rank_sub_arr_y, MPI_INT, 0, my_rank, MPI_COMM_WORLD);
+		}
+
+    	end_time = MPI_Wtime();
+    	elapsed_time = end_time - start_time;
+		MPI_Reduce(&elapsed_time, &all_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    	if(my_rank == 0){
+
+    		printf("Time needed: %f\n", all_time);
+
+    		printf("Enter n to proceed, q to exit\n");
+			scanf("%s",intmp);
+
+			if(totalcount<=0){
+				printf("All died out!\n");
+				strcpy(intmp,"q"); //no need to go on once all died
+			}
+			MPI_Bcast(intmp, 10, MPI_CHAR, 0, MPI_COMM_WORLD);
+			if(strcmp(intmp,"q")==0)
+				break;
+    	}
+    	else{
+
+	        MPI_Bcast(intmp, 10, MPI_CHAR, 0, MPI_COMM_WORLD);
+	    	if(strcmp(intmp,"q")==0)
+	    		break;
     	}
 
-    	MPI_Barrier(MPI_COMM_WORLD);
-
-    	print_cell(cell, arr_size_x, arr_size_y, print_ghostcell);
-
-	}
-	else{
-		// only send row 1 ~ rank_sub_arr_x - 1
-    	MPI_Send(new_loc_cell[1], (rank_sub_arr_x - 2) * rank_sub_arr_y, MPI_INT, 0, my_rank, MPI_COMM_WORLD);
-    	MPI_Barrier(MPI_COMM_WORLD);
-
-	}
-
-//	    if(1){
-//	    	int sleep=1;
-//	    	while(sleep){;}
-//	    }
-//	    MPI_Barrier(MPI_COMM_WORLD);
-
-
+    }
 
 	MPI_Finalize();
 
@@ -262,6 +288,11 @@ void main(int argc, char* argv[]) {
 
 
 
+//	    if(1){
+//	    	int sleep=1;
+//	    	while(sleep){;}
+//	    }
+//	    MPI_Barrier(MPI_COMM_WORLD);
 
 
 
